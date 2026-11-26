@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Clock,
+  GraduationCap,
   ImagePlus,
   LogOut,
   Newspaper,
@@ -8,78 +9,110 @@ import {
   Plus,
   RotateCcw,
   Settings,
+  ShieldCheck,
   Trash2,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
-import { DEFAULT_BELL_SCHEDULE, DEFAULT_SITE_SETTINGS } from '../data/fallbackData';
+import { Link } from 'react-router-dom';
+import {
+  DEFAULT_BELL_SCHEDULE,
+  DEFAULT_SITE_SETTINGS,
+  MAX_IMAGE_BYTES,
+  TEACHER_CATEGORIES,
+} from '../config/defaults';
 import { formatDate, translations } from '../i18n';
 import {
   ApiAuthError,
-  ApiUnavailableError,
+  ApiRequestError,
+  createAdminAccount,
   createNews,
   createStaff,
+  createTeacher,
+  deleteAdminAccount,
   deleteNews,
   deleteStaff,
+  deleteTeacher,
+  fetchAdmins,
   loginAdmin,
   saveSchedule,
   saveSettings,
   updateNews,
   updateStaff,
+  updateTeacher,
 } from '../services/api';
 import type {
+  AdminUser,
   BellLesson,
   BellScheduleData,
   Language,
   NewsItem,
   SiteSettings,
   StaffMember,
+  Teacher,
 } from '../types';
 import { SafeImage } from './SafeImage';
 
-const TOKEN_STORAGE_KEY = 'admin_token';
-
 interface AdminPanelProps {
   lang: Language;
+  token: string | null;
+  currentAdmin: AdminUser | null;
+  onAuthSuccess: (token: string, admin: AdminUser) => void;
+  onAuthClear: () => void;
   news: NewsItem[];
   staff: StaffMember[];
+  teachers: Teacher[];
   schedule: BellScheduleData;
   settings: SiteSettings;
-  isDemoMode: boolean;
-  onEnableDemoMode: () => void;
   onNewsCreated: (item: NewsItem) => void;
   onNewsUpdated: (item: NewsItem) => void;
   onNewsDeleted: (id: number | string) => void;
   onStaffCreated: (member: StaffMember) => void;
   onStaffUpdated: (member: StaffMember) => void;
   onStaffDeleted: (id: number | string) => void;
+  onTeacherCreated: (teacher: Teacher) => void;
+  onTeacherUpdated: (teacher: Teacher) => void;
+  onTeacherDeleted: (id: number | string) => void;
   onScheduleSaved: (schedule: BellScheduleData) => void;
   onSettingsSaved: (settings: SiteSettings) => void;
-  onClose: () => void;
+}
+
+function toDateInputValue(isoString?: string): string {
+  const d = isoString ? new Date(isoString) : new Date();
+  if (Number.isNaN(d.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  return d.toISOString().slice(0, 10);
 }
 
 export function AdminPanel({
   lang,
+  token,
+  currentAdmin,
+  onAuthSuccess,
+  onAuthClear,
   news,
   staff,
+  teachers,
   schedule,
   settings,
-  isDemoMode,
-  onEnableDemoMode,
   onNewsCreated,
   onNewsUpdated,
   onNewsDeleted,
   onStaffCreated,
   onStaffUpdated,
   onStaffDeleted,
+  onTeacherCreated,
+  onTeacherUpdated,
+  onTeacherDeleted,
   onScheduleSaved,
   onSettingsSaved,
-  onClose,
 }: AdminPanelProps) {
   const t = translations[lang];
-
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY));
-  const [activeTab, setActiveTab] = useState<'news' | 'staff' | 'schedule' | 'settings'>('news');
+  const [activeTab, setActiveTab] = useState<
+    'news' | 'staff' | 'teachers' | 'schedule' | 'settings' | 'admins'
+  >('news');
 
   // Login State
   const [username, setUsername] = useState('');
@@ -91,8 +124,11 @@ export function AdminPanel({
   const [editingNewsId, setEditingNewsId] = useState<number | string | null>(null);
   const [titleUz, setTitleUz] = useState('');
   const [titleRu, setTitleRu] = useState('');
+  const [summaryUz, setSummaryUz] = useState('');
+  const [summaryRu, setSummaryRu] = useState('');
   const [contentUz, setContentUz] = useState('');
   const [contentRu, setContentRu] = useState('');
+  const [publishDate, setPublishDate] = useState(() => toDateInputValue());
   const [newsImage, setNewsImage] = useState<File | null>(null);
   const newsFileInputRef = useRef<HTMLInputElement | null>(null);
   const [newsSubmitting, setNewsSubmitting] = useState(false);
@@ -113,6 +149,23 @@ export function AdminPanel({
   const [confirmDeleteStaffId, setConfirmDeleteStaffId] = useState<number | string | null>(null);
   const [deletingStaffId, setDeletingStaffId] = useState<number | string | null>(null);
 
+  // Teacher Form State (Create + Edit)
+  const [editingTeacherId, setEditingTeacherId] = useState<number | string | null>(null);
+  const [teacherFullName, setTeacherFullName] = useState('');
+  const [teacherSubjectUz, setTeacherSubjectUz] = useState('');
+  const [teacherSubjectRu, setTeacherSubjectRu] = useState('');
+  const [teacherCategoryUz, setTeacherCategoryUz] = useState('');
+  const [teacherCategoryRu, setTeacherCategoryRu] = useState('');
+  const [teacherExperience, setTeacherExperience] = useState('');
+  const [teacherBioUz, setTeacherBioUz] = useState('');
+  const [teacherBioRu, setTeacherBioRu] = useState('');
+  const [teacherPhoto, setTeacherPhoto] = useState<File | null>(null);
+  const teacherFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [teacherSubmitting, setTeacherSubmitting] = useState(false);
+  const [teacherFeedback, setTeacherFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [confirmDeleteTeacherId, setConfirmDeleteTeacherId] = useState<number | string | null>(null);
+  const [deletingTeacherId, setDeletingTeacherId] = useState<number | string | null>(null);
+
   // Bell Schedule Draft State
   const [scheduleDraft, setScheduleDraft] = useState<BellScheduleData>(schedule);
   const [scheduleShift, setScheduleShift] = useState<'shift1' | 'shift2'>('shift1');
@@ -124,6 +177,17 @@ export function AdminPanel({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsFeedback, setSettingsFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Admins Management State
+  const [admins, setAdmins] = useState<AdminUser[]>([]);
+  const [adminsLoading, setAdminsLoading] = useState(false);
+  const [newAdminName, setNewAdminName] = useState('');
+  const [newAdminUsername, setNewAdminUsername] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [adminSubmitting, setAdminSubmitting] = useState(false);
+  const [adminFeedback, setAdminFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [confirmDeleteAdminId, setConfirmDeleteAdminId] = useState<string | null>(null);
+  const [deletingAdminId, setDeletingAdminId] = useState<string | null>(null);
+
   useEffect(() => {
     setScheduleDraft(schedule);
   }, [schedule]);
@@ -132,6 +196,27 @@ export function AdminPanel({
     setSettingsDraft(settings);
   }, [settings]);
 
+  const loadAdminsList = useCallback(async () => {
+    if (!token) return;
+    setAdminsLoading(true);
+    try {
+      const list = await fetchAdmins(token);
+      setAdmins(list);
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        onAuthClear();
+      }
+    } finally {
+      setAdminsLoading(false);
+    }
+  }, [token, onAuthClear]);
+
+  useEffect(() => {
+    if (token && activeTab === 'admins') {
+      void loadAdminsList();
+    }
+  }, [token, activeTab, loadAdminsList]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -139,17 +224,10 @@ export function AdminPanel({
 
     try {
       const data = await loginAdmin(username.trim(), password);
-      localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
-      setToken(data.token);
+      onAuthSuccess(data.token, data.admin);
       setPassword('');
     } catch (err) {
-      if (err instanceof ApiUnavailableError) {
-        onEnableDemoMode();
-        const demoToken = 'demo_preview_token';
-        localStorage.setItem(TOKEN_STORAGE_KEY, demoToken);
-        setToken(demoToken);
-        setPassword('');
-      } else if (err instanceof ApiAuthError) {
+      if (err instanceof ApiAuthError) {
         setLoginError(t.admin.loginError);
       } else {
         setLoginError(t.admin.networkError);
@@ -160,9 +238,31 @@ export function AdminPanel({
   };
 
   const handleLogout = () => {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-    setToken(null);
+    onAuthClear();
     setLoginError(null);
+  };
+
+  // Strict 1 MB image validation helper
+  const validateSelectedImage = (
+    file: File | null,
+    setFeedback: (msg: { type: 'success' | 'error'; text: string } | null) => void,
+    inputRef: React.RefObject<HTMLInputElement | null>
+  ): File | null => {
+    if (!file) return null;
+    const isAllowedImage =
+      file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(file.name);
+    if (!isAllowedImage) {
+      if (inputRef.current) inputRef.current.value = '';
+      setFeedback({ type: 'error', text: t.admin.imageTypeError });
+      return null;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      if (inputRef.current) inputRef.current.value = '';
+      setFeedback({ type: 'error', text: t.admin.imageTooLargeError });
+      return null;
+    }
+    setFeedback(null);
+    return file;
   };
 
   // News handlers
@@ -170,8 +270,11 @@ export function AdminPanel({
     setEditingNewsId(null);
     setTitleUz('');
     setTitleRu('');
+    setSummaryUz('');
+    setSummaryRu('');
     setContentUz('');
     setContentRu('');
+    setPublishDate(toDateInputValue());
     setNewsImage(null);
     if (newsFileInputRef.current) newsFileInputRef.current.value = '';
   };
@@ -180,8 +283,11 @@ export function AdminPanel({
     setEditingNewsId(item.id);
     setTitleUz(item.title_uz);
     setTitleRu(item.title_ru);
+    setSummaryUz(item.summary_uz || '');
+    setSummaryRu(item.summary_ru || '');
     setContentUz(item.content_uz);
     setContentRu(item.content_ru);
+    setPublishDate(toDateInputValue(item.created_at));
     setNewsImage(null);
     setNewsFeedback(null);
     if (newsFileInputRef.current) newsFileInputRef.current.value = '';
@@ -196,14 +302,24 @@ export function AdminPanel({
       return;
     }
 
+    if (newsImage && newsImage.size > MAX_IMAGE_BYTES) {
+      setNewsFeedback({ type: 'error', text: t.admin.imageTooLargeError });
+      return;
+    }
+
     setNewsSubmitting(true);
     setNewsFeedback(null);
 
     const formData = new FormData();
     formData.append('title_uz', titleUz.trim());
     formData.append('title_ru', titleRu.trim());
+    formData.append('summary_uz', summaryUz.trim());
+    formData.append('summary_ru', summaryRu.trim());
     formData.append('content_uz', contentUz.trim());
     formData.append('content_ru', contentRu.trim());
+    if (publishDate) {
+      formData.append('created_at', new Date(`${publishDate}T09:00:00Z`).toISOString());
+    }
     if (newsImage) {
       formData.append('image', newsImage);
     }
@@ -221,43 +337,16 @@ export function AdminPanel({
         setNewsFeedback({ type: 'success', text: t.admin.newsForm.successAdd });
       }
     } catch (err) {
-      if (err instanceof ApiUnavailableError) {
-        onEnableDemoMode();
-        if (editingNewsId !== null) {
-          const existing = news.find((n) => n.id === editingNewsId);
-          const fallbackUpdated: NewsItem = {
-            id: editingNewsId,
-            title_uz: titleUz.trim(),
-            title_ru: titleRu.trim(),
-            content_uz: contentUz.trim(),
-            content_ru: contentRu.trim(),
-            image_url: newsImage
-              ? URL.createObjectURL(newsImage)
-              : existing?.image_url ?? null,
-            created_at: existing?.created_at ?? new Date().toISOString(),
-          };
-          onNewsUpdated(fallbackUpdated);
-          resetNewsForm();
-          setNewsFeedback({ type: 'success', text: t.admin.newsForm.successEdit });
-        } else {
-          const fallbackCreated: NewsItem = {
-            id: Date.now(),
-            title_uz: titleUz.trim(),
-            title_ru: titleRu.trim(),
-            content_uz: contentUz.trim(),
-            content_ru: contentRu.trim(),
-            image_url: newsImage ? URL.createObjectURL(newsImage) : null,
-            created_at: new Date().toISOString(),
-          };
-          onNewsCreated(fallbackCreated);
-          resetNewsForm();
-          setNewsFeedback({ type: 'success', text: t.admin.newsForm.successAdd });
-        }
-      } else if (err instanceof ApiAuthError) {
+      if (err instanceof ApiAuthError) {
         handleLogout();
         setLoginError(t.admin.loginError);
+      } else if (err instanceof ApiRequestError && err.code === 'FILE_TOO_LARGE') {
+        setNewsFeedback({ type: 'error', text: t.admin.imageTooLargeError });
       } else {
-        setNewsFeedback({ type: 'error', text: t.admin.actionError });
+        setNewsFeedback({
+          type: 'error',
+          text: err instanceof Error ? err.message : t.admin.actionError,
+        });
       }
     } finally {
       setNewsSubmitting(false);
@@ -274,12 +363,7 @@ export function AdminPanel({
       if (editingNewsId === id) resetNewsForm();
       setConfirmDeleteNewsId(null);
     } catch (err) {
-      if (err instanceof ApiUnavailableError) {
-        onEnableDemoMode();
-        onNewsDeleted(id);
-        if (editingNewsId === id) resetNewsForm();
-        setConfirmDeleteNewsId(null);
-      } else if (err instanceof ApiAuthError) {
+      if (err instanceof ApiAuthError) {
         handleLogout();
         setLoginError(t.admin.loginError);
       } else {
@@ -321,6 +405,11 @@ export function AdminPanel({
       return;
     }
 
+    if (staffPhoto && staffPhoto.size > MAX_IMAGE_BYTES) {
+      setStaffFeedback({ type: 'error', text: t.admin.imageTooLargeError });
+      return;
+    }
+
     setStaffSubmitting(true);
     setStaffFeedback(null);
 
@@ -346,39 +435,11 @@ export function AdminPanel({
         setStaffFeedback({ type: 'success', text: t.admin.staffForm.successAdd });
       }
     } catch (err) {
-      if (err instanceof ApiUnavailableError) {
-        onEnableDemoMode();
-        if (editingStaffId !== null) {
-          const existing = staff.find((m) => m.id === editingStaffId);
-          const fallbackUpdated: StaffMember = {
-            id: editingStaffId,
-            full_name: fullName.trim(),
-            position_uz: positionUz.trim(),
-            position_ru: positionRu.trim(),
-            reception_hours: receptionHours.trim(),
-            photo_url: staffPhoto
-              ? URL.createObjectURL(staffPhoto)
-              : existing?.photo_url ?? null,
-          };
-          onStaffUpdated(fallbackUpdated);
-          resetStaffForm();
-          setStaffFeedback({ type: 'success', text: t.admin.staffForm.successEdit });
-        } else {
-          const fallbackCreated: StaffMember = {
-            id: Date.now(),
-            full_name: fullName.trim(),
-            position_uz: positionUz.trim(),
-            position_ru: positionRu.trim(),
-            reception_hours: receptionHours.trim(),
-            photo_url: staffPhoto ? URL.createObjectURL(staffPhoto) : null,
-          };
-          onStaffCreated(fallbackCreated);
-          resetStaffForm();
-          setStaffFeedback({ type: 'success', text: t.admin.staffForm.successAdd });
-        }
-      } else if (err instanceof ApiAuthError) {
+      if (err instanceof ApiAuthError) {
         handleLogout();
         setLoginError(t.admin.loginError);
+      } else if (err instanceof ApiRequestError && err.code === 'FILE_TOO_LARGE') {
+        setStaffFeedback({ type: 'error', text: t.admin.imageTooLargeError });
       } else {
         setStaffFeedback({ type: 'error', text: t.admin.actionError });
       }
@@ -397,12 +458,7 @@ export function AdminPanel({
       if (editingStaffId === id) resetStaffForm();
       setConfirmDeleteStaffId(null);
     } catch (err) {
-      if (err instanceof ApiUnavailableError) {
-        onEnableDemoMode();
-        onStaffDeleted(id);
-        if (editingStaffId === id) resetStaffForm();
-        setConfirmDeleteStaffId(null);
-      } else if (err instanceof ApiAuthError) {
+      if (err instanceof ApiAuthError) {
         handleLogout();
         setLoginError(t.admin.loginError);
       } else {
@@ -410,6 +466,122 @@ export function AdminPanel({
       }
     } finally {
       setDeletingStaffId(null);
+    }
+  };
+
+  // Teacher handlers
+  const resetTeacherForm = () => {
+    setEditingTeacherId(null);
+    setTeacherFullName('');
+    setTeacherSubjectUz('');
+    setTeacherSubjectRu('');
+    setTeacherCategoryUz('');
+    setTeacherCategoryRu('');
+    setTeacherExperience('');
+    setTeacherBioUz('');
+    setTeacherBioRu('');
+    setTeacherPhoto(null);
+    if (teacherFileInputRef.current) teacherFileInputRef.current.value = '';
+  };
+
+  const startEditTeacher = (teacher: Teacher) => {
+    const rawCatUz = (teacher.category_uz || '').trim();
+    const rawCatRu = (teacher.category_ru || '').trim();
+    const matchedCat = TEACHER_CATEGORIES.find(
+      (c) => c.uz === rawCatUz || c.ru === rawCatRu
+    );
+
+    setEditingTeacherId(teacher.id);
+    setTeacherFullName(teacher.full_name);
+    setTeacherSubjectUz(teacher.subject_uz);
+    setTeacherSubjectRu(teacher.subject_ru);
+    setTeacherCategoryUz(matchedCat ? matchedCat.uz : rawCatUz);
+    setTeacherCategoryRu(matchedCat ? matchedCat.ru : rawCatRu);
+    setTeacherExperience(teacher.experience_years || '');
+    setTeacherBioUz(teacher.bio_uz || '');
+    setTeacherBioRu(teacher.bio_ru || '');
+    setTeacherPhoto(null);
+    setTeacherFeedback(null);
+    if (teacherFileInputRef.current) teacherFileInputRef.current.value = '';
+  };
+
+  const handleSaveTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+
+    if (!teacherFullName.trim() || !teacherSubjectUz.trim() || !teacherSubjectRu.trim()) {
+      setTeacherFeedback({ type: 'error', text: t.admin.teacherForm.requiredError });
+      return;
+    }
+
+    if (teacherPhoto && teacherPhoto.size > MAX_IMAGE_BYTES) {
+      setTeacherFeedback({ type: 'error', text: t.admin.imageTooLargeError });
+      return;
+    }
+
+    setTeacherSubmitting(true);
+    setTeacherFeedback(null);
+
+    const formData = new FormData();
+    formData.append('full_name', teacherFullName.trim());
+    formData.append('subject_uz', teacherSubjectUz.trim());
+    formData.append('subject_ru', teacherSubjectRu.trim());
+    formData.append('category_uz', teacherCategoryUz.trim());
+    formData.append('category_ru', teacherCategoryRu.trim());
+    formData.append('experience_years', teacherExperience.trim());
+    formData.append('bio_uz', teacherBioUz.trim());
+    formData.append('bio_ru', teacherBioRu.trim());
+    if (teacherPhoto) {
+      formData.append('photo', teacherPhoto);
+    }
+
+    try {
+      if (editingTeacherId !== null) {
+        const updated = await updateTeacher(editingTeacherId, formData, token);
+        onTeacherUpdated(updated);
+        resetTeacherForm();
+        setTeacherFeedback({ type: 'success', text: t.admin.teacherForm.successEdit });
+      } else {
+        const created = await createTeacher(formData, token);
+        onTeacherCreated(created);
+        resetTeacherForm();
+        setTeacherFeedback({ type: 'success', text: t.admin.teacherForm.successAdd });
+      }
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        handleLogout();
+        setLoginError(t.admin.loginError);
+      } else if (err instanceof ApiRequestError && err.code === 'FILE_TOO_LARGE') {
+        setTeacherFeedback({ type: 'error', text: t.admin.imageTooLargeError });
+      } else {
+        setTeacherFeedback({
+          type: 'error',
+          text: err instanceof Error ? err.message : t.admin.actionError,
+        });
+      }
+    } finally {
+      setTeacherSubmitting(false);
+    }
+  };
+
+  const handleDeleteTeacher = async (id: number | string) => {
+    if (!token) return;
+    setDeletingTeacherId(id);
+
+    try {
+      await deleteTeacher(id, token);
+      onTeacherDeleted(id);
+      if (editingTeacherId === id) resetTeacherForm();
+      setConfirmDeleteTeacherId(null);
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        handleLogout();
+        setLoginError(t.admin.loginError);
+      } else {
+        setTeacherFeedback({ type: 'error', text: t.admin.actionError });
+      }
+    } finally {
+      setDeletingTeacherId(null);
     }
   };
 
@@ -461,11 +633,7 @@ export function AdminPanel({
       onScheduleSaved(saved);
       setScheduleFeedback({ type: 'success', text: t.admin.scheduleEditor.savedSuccess });
     } catch (err) {
-      if (err instanceof ApiUnavailableError) {
-        onEnableDemoMode();
-        onScheduleSaved(scheduleDraft);
-        setScheduleFeedback({ type: 'success', text: t.admin.scheduleEditor.savedSuccess });
-      } else if (err instanceof ApiAuthError) {
+      if (err instanceof ApiAuthError) {
         handleLogout();
         setLoginError(t.admin.loginError);
       } else {
@@ -488,11 +656,7 @@ export function AdminPanel({
       onSettingsSaved(saved);
       setSettingsFeedback({ type: 'success', text: t.admin.settingsEditor.savedSuccess });
     } catch (err) {
-      if (err instanceof ApiUnavailableError) {
-        onEnableDemoMode();
-        onSettingsSaved(settingsDraft);
-        setSettingsFeedback({ type: 'success', text: t.admin.settingsEditor.savedSuccess });
-      } else if (err instanceof ApiAuthError) {
+      if (err instanceof ApiAuthError) {
         handleLogout();
         setLoginError(t.admin.loginError);
       } else {
@@ -500,6 +664,78 @@ export function AdminPanel({
       }
     } finally {
       setSettingsSaving(false);
+    }
+  };
+
+  // Admin management handlers
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+
+    if (
+      !newAdminName.trim() ||
+      newAdminUsername.trim().length < 3 ||
+      newAdminPassword.length < 6
+    ) {
+      setAdminFeedback({ type: 'error', text: t.admin.adminsManager.validationError });
+      return;
+    }
+
+    setAdminSubmitting(true);
+    setAdminFeedback(null);
+
+    try {
+      const created = await createAdminAccount(
+        {
+          full_name: newAdminName.trim(),
+          username: newAdminUsername.trim(),
+          password: newAdminPassword,
+        },
+        token
+      );
+      setAdmins((prev) => [...prev, created]);
+      setNewAdminName('');
+      setNewAdminUsername('');
+      setNewAdminPassword('');
+      setAdminFeedback({ type: 'success', text: t.admin.adminsManager.successAdd });
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        handleLogout();
+        setLoginError(t.admin.loginError);
+      } else if (err instanceof ApiRequestError && err.code === 'DUPLICATE_USERNAME') {
+        setAdminFeedback({ type: 'error', text: t.admin.adminsManager.duplicateError });
+      } else {
+        setAdminFeedback({
+          type: 'error',
+          text: err instanceof Error ? err.message : t.admin.actionError,
+        });
+      }
+    } finally {
+      setAdminSubmitting(false);
+    }
+  };
+
+  const handleDeleteAdmin = async (id: string) => {
+    if (!token) return;
+    setDeletingAdminId(id);
+    setAdminFeedback(null);
+
+    try {
+      await deleteAdminAccount(id, token);
+      setAdmins((prev) => prev.filter((a) => a.id !== id));
+      setConfirmDeleteAdminId(null);
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        handleLogout();
+        setLoginError(t.admin.loginError);
+      } else {
+        setAdminFeedback({
+          type: 'error',
+          text: err instanceof Error ? err.message : t.admin.actionError,
+        });
+      }
+    } finally {
+      setDeletingAdminId(null);
     }
   };
 
@@ -516,6 +752,14 @@ export function AdminPanel({
           </div>
 
           <div className="flex items-center gap-3">
+            {token && currentAdmin && (
+              <span className="hidden sm:inline-block text-xs text-slate-500">
+                {t.admin.signedInAs}:{' '}
+                <strong className="font-semibold text-[#0F2544]">
+                  {currentAdmin.full_name} (@{currentAdmin.username})
+                </strong>
+              </span>
+            )}
             {token && (
               <button
                 type="button"
@@ -526,13 +770,12 @@ export function AdminPanel({
                 <span>{t.admin.logoutButton}</span>
               </button>
             )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-[#0F2544] bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+            <Link
+              to="/"
+              className="px-4 py-2 text-xs font-semibold text-[#0F2544] bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors whitespace-nowrap"
             >
               {t.backToSite}
-            </button>
+            </Link>
           </div>
         </div>
 
@@ -543,12 +786,6 @@ export function AdminPanel({
               {t.admin.loginTitle}
             </h2>
             <p className="mt-1.5 text-sm text-slate-600">{t.admin.loginDesc}</p>
-
-            {isDemoMode && (
-              <div className="mt-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 leading-relaxed">
-                {t.admin.demoLoginHint}
-              </div>
-            )}
 
             <form onSubmit={handleLogin} className="mt-6 space-y-4">
               <div>
@@ -562,6 +799,7 @@ export function AdminPanel({
                   id="admin-username"
                   type="text"
                   required
+                  autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder={t.admin.usernamePlaceholder}
@@ -580,6 +818,7 @@ export function AdminPanel({
                   id="admin-password"
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={t.admin.passwordPlaceholder}
@@ -608,12 +847,6 @@ export function AdminPanel({
         ) : (
           /* Authenticated Dashboard */
           <div className="mt-8">
-            {isDemoMode && (
-              <div className="mb-6 px-4 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                {t.demoNotice}
-              </div>
-            )}
-
             {/* Dashboard Tabs */}
             <div
               role="tablist"
@@ -650,6 +883,20 @@ export function AdminPanel({
               <button
                 type="button"
                 role="tab"
+                aria-selected={activeTab === 'teachers'}
+                onClick={() => setActiveTab('teachers')}
+                className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                  activeTab === 'teachers'
+                    ? 'bg-white text-[#0F2544] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4 shrink-0" />
+                <span>{t.admin.tabs.teachers}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={activeTab === 'schedule'}
                 onClick={() => setActiveTab('schedule')}
                 className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
@@ -675,9 +922,23 @@ export function AdminPanel({
                 <Settings className="w-4 h-4 shrink-0" />
                 <span>{t.admin.tabs.settings}</span>
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'admins'}
+                onClick={() => setActiveTab('admins')}
+                className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                  activeTab === 'admins'
+                    ? 'bg-white text-[#0F2544] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span>{t.admin.tabs.admins}</span>
+              </button>
             </div>
 
-            {/* Tab 1: Manage News (Add, Edit, Delete) */}
+            {/* Tab 1: Manage News */}
             {activeTab === 'news' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 <form
@@ -699,6 +960,19 @@ export function AdminPanel({
                         {t.admin.newsForm.cancelEdit}
                       </button>
                     )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.newsForm.publishDate}
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={publishDate}
+                      onChange={(e) => setPublishDate(e.target.value)}
+                      className="w-full px-3 py-2 font-mono text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
                   </div>
 
                   <div>
@@ -729,10 +1003,34 @@ export function AdminPanel({
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.newsForm.summaryUz}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={summaryUz}
+                      onChange={(e) => setSummaryUz(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.newsForm.summaryRu}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={summaryRu}
+                      onChange={(e) => setSummaryRu(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
                       {t.admin.newsForm.contentUz}
                     </label>
                     <textarea
-                      rows={3}
+                      rows={4}
                       required
                       value={contentUz}
                       onChange={(e) => setContentUz(e.target.value)}
@@ -745,7 +1043,7 @@ export function AdminPanel({
                       {t.admin.newsForm.contentRu}
                     </label>
                     <textarea
-                      rows={3}
+                      rows={4}
                       required
                       value={contentRu}
                       onChange={(e) => setContentRu(e.target.value)}
@@ -754,9 +1052,10 @@ export function AdminPanel({
                   </div>
 
                   <div>
-                    <span className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <span className="block text-xs font-semibold text-slate-700 mb-1">
                       {t.admin.newsForm.image}
                     </span>
+                    <p className="text-xs text-slate-500 mb-2">{t.admin.imageLimitHint}</p>
                     <div className="flex items-center gap-2">
                       <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg cursor-pointer">
                         <ImagePlus className="w-4 h-4 text-slate-500" />
@@ -764,9 +1063,17 @@ export function AdminPanel({
                         <input
                           ref={newsFileInputRef}
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
                           className="sr-only"
-                          onChange={(e) => setNewsImage(e.target.files?.[0] ?? null)}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] ?? null;
+                            const valid = validateSelectedImage(
+                              file,
+                              setNewsFeedback,
+                              newsFileInputRef
+                            );
+                            setNewsImage(valid);
+                          }}
                         />
                       </label>
                       {newsImage && (
@@ -911,7 +1218,7 @@ export function AdminPanel({
               </div>
             )}
 
-            {/* Tab 2: Manage Staff (Add, Edit, Delete) */}
+            {/* Tab 2: Manage Staff */}
             {activeTab === 'staff' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 <form
@@ -989,9 +1296,10 @@ export function AdminPanel({
                   </div>
 
                   <div>
-                    <span className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <span className="block text-xs font-semibold text-slate-700 mb-1">
                       {t.admin.staffForm.photo}
                     </span>
+                    <p className="text-xs text-slate-500 mb-2">{t.admin.imageLimitHint}</p>
                     <div className="flex items-center gap-2">
                       <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg cursor-pointer">
                         <ImagePlus className="w-4 h-4 text-slate-500" />
@@ -999,9 +1307,17 @@ export function AdminPanel({
                         <input
                           ref={staffFileInputRef}
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
                           className="sr-only"
-                          onChange={(e) => setStaffPhoto(e.target.files?.[0] ?? null)}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] ?? null;
+                            const valid = validateSelectedImage(
+                              file,
+                              setStaffFeedback,
+                              staffFileInputRef
+                            );
+                            setStaffPhoto(valid);
+                          }}
                         />
                       </label>
                       {staffPhoto && (
@@ -1138,6 +1454,327 @@ export function AdminPanel({
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                   <span>{t.admin.staffList.delete}</span>
+                                </button>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Tab 2B: Manage Teachers */}
+            {activeTab === 'teachers' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                <form
+                  onSubmit={handleSaveTeacher}
+                  className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-6 space-y-4"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="font-serif text-lg font-semibold text-[#0F2544]">
+                      {editingTeacherId !== null
+                        ? t.admin.teacherForm.headingEdit
+                        : t.admin.teacherForm.headingAdd}
+                    </h2>
+                    {editingTeacherId !== null && (
+                      <button
+                        type="button"
+                        onClick={resetTeacherForm}
+                        className="text-xs font-medium text-slate-600 hover:text-slate-900 underline cursor-pointer"
+                      >
+                        {t.admin.teacherForm.cancelEdit}
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.fullName}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={teacherFullName}
+                      onChange={(e) => setTeacherFullName(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.subjectUz}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={teacherSubjectUz}
+                      onChange={(e) => setTeacherSubjectUz(e.target.value)}
+                      placeholder={t.admin.teacherForm.subjectPlaceholderUz}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.subjectRu}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={teacherSubjectRu}
+                      onChange={(e) => setTeacherSubjectRu(e.target.value)}
+                      placeholder={t.admin.teacherForm.subjectPlaceholderRu}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.categoryLabel}
+                    </label>
+                    <select
+                      value={teacherCategoryUz}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const matched = TEACHER_CATEGORIES.find((cat) => cat.uz === val);
+                        setTeacherCategoryUz(val);
+                        if (matched) {
+                          setTeacherCategoryRu(matched.ru);
+                        } else if (!val) {
+                          setTeacherCategoryRu('');
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544] cursor-pointer"
+                    >
+                      <option value="">{t.admin.teacherForm.categoryNotSelected}</option>
+                      {TEACHER_CATEGORIES.map((cat) => (
+                        <option key={cat.uz} value={cat.uz}>
+                          {lang === 'uz' ? cat.uz : `${cat.ru} (${cat.uz})`}
+                        </option>
+                      ))}
+                      {teacherCategoryUz &&
+                        !TEACHER_CATEGORIES.some((cat) => cat.uz === teacherCategoryUz) && (
+                          <option value={teacherCategoryUz}>
+                            {lang === 'uz'
+                              ? teacherCategoryUz
+                              : teacherCategoryRu || teacherCategoryUz}
+                          </option>
+                        )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.experienceYears}
+                    </label>
+                    <input
+                      type="text"
+                      value={teacherExperience}
+                      onChange={(e) => setTeacherExperience(e.target.value)}
+                      placeholder={t.admin.teacherForm.experiencePlaceholder}
+                      className="w-full px-3 py-2 font-mono text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.bioUz}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={teacherBioUz}
+                      onChange={(e) => setTeacherBioUz(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.bioRu}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={teacherBioRu}
+                      onChange={(e) => setTeacherBioRu(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.teacherForm.photo}
+                    </span>
+                    <p className="text-xs text-slate-500 mb-2">{t.admin.imageLimitHint}</p>
+                    <div className="flex items-center gap-2">
+                      <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg cursor-pointer">
+                        <ImagePlus className="w-4 h-4 text-slate-500" />
+                        <span>{t.admin.teacherForm.chooseFile}</span>
+                        <input
+                          ref={teacherFileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          className="sr-only"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] ?? null;
+                            const valid = validateSelectedImage(
+                              file,
+                              setTeacherFeedback,
+                              teacherFileInputRef
+                            );
+                            setTeacherPhoto(valid);
+                          }}
+                        />
+                      </label>
+                      {teacherPhoto && (
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-xs text-slate-600 truncate max-w-[140px]">
+                            {teacherPhoto.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTeacherPhoto(null);
+                              if (teacherFileInputRef.current) {
+                                teacherFileInputRef.current.value = '';
+                              }
+                            }}
+                            aria-label={t.admin.teacherForm.clearFile}
+                            className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {editingTeacherId !== null && !teacherPhoto && (
+                      <p className="mt-1.5 text-xs text-slate-500">
+                        {t.admin.teacherForm.photoKeepHint}
+                      </p>
+                    )}
+                  </div>
+
+                  {teacherFeedback && (
+                    <p
+                      role="status"
+                      className={`text-xs font-medium px-3 py-2 rounded-lg border ${
+                        teacherFeedback.type === 'success'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-red-50 text-red-700 border-red-200'
+                      }`}
+                    >
+                      {teacherFeedback.text}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={teacherSubmitting}
+                    className="w-full py-2.5 px-4 text-sm font-semibold text-white bg-[#0F2544] hover:bg-[#173560] disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+                  >
+                    {teacherSubmitting
+                      ? t.admin.teacherForm.submitting
+                      : editingTeacherId !== null
+                        ? t.admin.teacherForm.submitEdit
+                        : t.admin.teacherForm.submitAdd}
+                  </button>
+                </form>
+
+                {/* Existing Teachers List */}
+                <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6">
+                  <h2 className="font-serif text-lg font-semibold text-[#0F2544] pb-4 border-b border-slate-200">
+                    {t.admin.teacherList.heading} ({teachers.length})
+                  </h2>
+
+                  {teachers.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-slate-500">
+                      {t.admin.teacherList.empty}
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-slate-200">
+                      {teachers.map((teacher) => {
+                        const subject = lang === 'uz' ? teacher.subject_uz : teacher.subject_ru;
+                        const category = (
+                          lang === 'uz' ? teacher.category_uz : teacher.category_ru
+                        ).trim();
+                        const exp = (teacher.experience_years || '').trim();
+                        const metaParts = [
+                          category,
+                          exp ? `${exp} ${t.teachers.experienceSuffix}` : '',
+                        ].filter(Boolean);
+                        const isConfirming = confirmDeleteTeacherId === teacher.id;
+                        const isEditing = editingTeacherId === teacher.id;
+
+                        return (
+                          <li
+                            key={teacher.id}
+                            className={`py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                              isEditing ? 'bg-slate-50 -mx-3 px-3 rounded-lg' : ''
+                            }`}
+                          >
+                            <div className="flex items-start gap-3.5 min-w-0">
+                              <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
+                                <SafeImage
+                                  src={teacher.photo_url}
+                                  alt={teacher.full_name}
+                                  variant="staff"
+                                  fallbackLabel={teacher.full_name}
+                                  className="w-full h-full object-cover object-top"
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-[#0F2544]">
+                                  {teacher.full_name}
+                                </p>
+                                <p className="mt-0.5 text-xs font-medium text-[#047857]">
+                                  {subject}
+                                </p>
+                                {metaParts.length > 0 && (
+                                  <p className="mt-0.5 text-xs text-slate-500 tabular-nums">
+                                    {metaParts.join(' · ')}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => startEditTeacher(teacher)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-[#0F2544] hover:bg-slate-100 border border-slate-200 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                <span>{t.admin.teacherList.edit}</span>
+                              </button>
+
+                              {isConfirming ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={deletingTeacherId === teacher.id}
+                                    onClick={() => handleDeleteTeacher(teacher.id)}
+                                    className="px-2.5 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md cursor-pointer whitespace-nowrap"
+                                  >
+                                    {t.admin.teacherList.confirmDelete}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteTeacherId(null)}
+                                    className="px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md cursor-pointer whitespace-nowrap"
+                                  >
+                                    {t.admin.teacherList.cancelDelete}
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteTeacherId(teacher.id)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>{t.admin.teacherList.delete}</span>
                                 </button>
                               )}
                             </div>
@@ -1698,6 +2335,175 @@ export function AdminPanel({
                   </button>
                 </div>
               </form>
+            )}
+
+            {/* Tab 5: Admin Management */}
+            {activeTab === 'admins' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                <form
+                  onSubmit={handleCreateAdmin}
+                  className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-6 space-y-4"
+                >
+                  <div className="flex items-center gap-2 text-[#0F2544]">
+                    <UserPlus className="w-5 h-5 text-[#047857]" />
+                    <h2 className="font-serif text-lg font-semibold">
+                      {t.admin.adminsManager.addHeading}
+                    </h2>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.adminsManager.fullNameLabel}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newAdminName}
+                      onChange={(e) => setNewAdminName(e.target.value)}
+                      placeholder={t.admin.adminsManager.fullNamePlaceholder}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.adminsManager.usernameLabel}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={3}
+                      value={newAdminUsername}
+                      onChange={(e) => setNewAdminUsername(e.target.value)}
+                      placeholder={t.admin.adminsManager.usernamePlaceholder}
+                      className="w-full px-3 py-2 font-mono text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {t.admin.adminsManager.passwordLabel}
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={newAdminPassword}
+                      onChange={(e) => setNewAdminPassword(e.target.value)}
+                      placeholder={t.admin.adminsManager.passwordPlaceholder}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0F2544]/20 focus:border-[#0F2544]"
+                    />
+                  </div>
+
+                  {adminFeedback && (
+                    <p
+                      role="status"
+                      className={`text-xs font-medium px-3 py-2 rounded-lg border ${
+                        adminFeedback.type === 'success'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-red-50 text-red-700 border-red-200'
+                      }`}
+                    >
+                      {adminFeedback.text}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={adminSubmitting}
+                    className="w-full py-2.5 px-4 text-sm font-semibold text-white bg-[#0F2544] hover:bg-[#173560] disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+                  >
+                    {adminSubmitting ? t.admin.adminsManager.submitting : t.admin.adminsManager.submit}
+                  </button>
+                </form>
+
+                <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6">
+                  <div className="pb-4 border-b border-slate-200">
+                    <h2 className="font-serif text-lg font-semibold text-[#0F2544]">
+                      {t.admin.adminsManager.listHeading} ({admins.length})
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {t.admin.adminsManager.subtitle}
+                    </p>
+                  </div>
+
+                  {adminsLoading ? (
+                    <div className="py-8 space-y-3 animate-pulse">
+                      <div className="h-12 bg-slate-100 rounded-lg" />
+                      <div className="h-12 bg-slate-100 rounded-lg" />
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-slate-200">
+                      {admins.map((adminItem) => {
+                        const isProtected =
+                          adminItem.is_root ||
+                          adminItem.username.toLowerCase() === 'admin' ||
+                          currentAdmin?.id === adminItem.id;
+                        const isConfirming = confirmDeleteAdminId === adminItem.id;
+
+                        return (
+                          <li
+                            key={adminItem.id}
+                            className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                          >
+                            <div>
+                              <p className="text-sm font-semibold text-[#0F2544]">
+                                {adminItem.full_name}
+                              </p>
+                              <p className="mt-0.5 text-xs text-slate-500 font-mono">
+                                @{adminItem.username}
+                                <span aria-hidden="true"> · </span>
+                                <span className="font-sans">
+                                  {formatDate(adminItem.created_at, lang)}
+                                </span>
+                              </p>
+                              {(adminItem.is_root ||
+                                adminItem.username.toLowerCase() === 'admin') && (
+                                <p className="mt-1 text-xs font-medium text-[#047857]">
+                                  {t.admin.adminsManager.rootBadge}
+                                </p>
+                              )}
+                            </div>
+
+                            {!isProtected && (
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {isConfirming ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={deletingAdminId === adminItem.id}
+                                      onClick={() => handleDeleteAdmin(adminItem.id)}
+                                      className="px-2.5 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md cursor-pointer whitespace-nowrap"
+                                    >
+                                      {t.admin.adminsManager.confirmDelete}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteAdminId(null)}
+                                      className="px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md cursor-pointer whitespace-nowrap"
+                                    >
+                                      {t.admin.adminsManager.cancelDelete}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteAdminId(adminItem.id)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>{t.admin.adminsManager.delete}</span>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}

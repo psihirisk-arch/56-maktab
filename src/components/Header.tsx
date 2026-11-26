@@ -1,50 +1,36 @@
 import { useState } from 'react';
 import { Lock, Menu, X } from 'lucide-react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { translations } from '../i18n';
 import type { Language } from '../types';
 
 interface HeaderProps {
   lang: Language;
   onChangeLang: (lang: Language) => void;
-  isAdminView: boolean;
-  onToggleAdmin: () => void;
 }
 
-export function Header({ lang, onChangeLang, isAdminView, onToggleAdmin }: HeaderProps) {
+export function Header({ lang, onChangeLang }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
   const t = translations[lang];
+  const isAdminView = location.pathname.startsWith('/admin');
 
   const navItems = [
-    { href: '#hero', label: t.nav.home },
-    { href: '#about', label: t.nav.about },
-    { href: '#staff', label: t.nav.staff },
-    { href: '#news', label: t.nav.news },
-    { href: '#resources', label: t.nav.resources },
+    { to: '/', label: t.nav.home, end: true },
+    { to: '/about', label: t.nav.about, end: false },
+    { to: '/staff', label: t.nav.staff, end: false },
+    { to: '/teachers', label: t.nav.teachers, end: false },
+    { to: '/news', label: t.nav.news, end: false },
+    { to: '/resources', label: t.nav.resources, end: false },
   ];
-
-  const handleNavClick = (href: string) => {
-    setMobileMenuOpen(false);
-    if (isAdminView) {
-      onToggleAdmin();
-      setTimeout(() => {
-        const el = document.querySelector(href);
-        el?.scrollIntoView({ behavior: 'smooth' });
-      }, 60);
-    }
-  };
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 lg:gap-8">
         {/* Zone 1: Clean Single-Line School Brand */}
-        <a
-          href="#hero"
-          onClick={(e) => {
-            if (isAdminView) {
-              e.preventDefault();
-              onToggleAdmin();
-            }
-          }}
+        <Link
+          to="/"
+          onClick={() => setMobileMenuOpen(false)}
           className="flex items-center gap-2.5 text-[#0F2544] hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F2544] rounded-md"
         >
           <svg
@@ -71,22 +57,29 @@ export function Header({ lang, onChangeLang, isAdminView, onToggleAdmin }: Heade
           <span className="font-serif text-lg font-semibold tracking-tight whitespace-nowrap shrink-0">
             {t.brandShort}
           </span>
-        </a>
+        </Link>
 
-        {/* Zone 2: Primary Navigation Links */}
+        {/* Zone 2: Primary Multi-Page Navigation Links */}
         {!isAdminView && (
           <nav
             aria-label="Primary"
-            className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-600"
+            className="hidden lg:flex items-center gap-4 xl:gap-6 text-sm font-medium text-slate-600"
           >
             {navItems.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="py-1 text-slate-600 hover:text-[#0F2544] border-b-2 border-transparent hover:border-[#059669] transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0F2544]"
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  `py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0F2544] ${
+                    isActive
+                      ? 'text-[#0F2544] border-[#059669] font-semibold'
+                      : 'text-slate-600 border-transparent hover:text-[#0F2544] hover:border-[#059669]'
+                  }`
+                }
               >
                 {item.label}
-              </a>
+              </NavLink>
             ))}
           </nav>
         )}
@@ -124,13 +117,10 @@ export function Header({ lang, onChangeLang, isAdminView, onToggleAdmin }: Heade
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setMobileMenuOpen(false);
-              onToggleAdmin();
-            }}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F2544] ${
+          <Link
+            to={isAdminView ? '/' : '/admin'}
+            onClick={() => setMobileMenuOpen(false)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F2544] ${
               isAdminView
                 ? 'bg-slate-100 text-slate-800 hover:bg-slate-200 border border-slate-200'
                 : 'bg-[#0F2544] text-white hover:bg-[#173560]'
@@ -138,7 +128,7 @@ export function Header({ lang, onChangeLang, isAdminView, onToggleAdmin }: Heade
           >
             {!isAdminView && <Lock className="w-3.5 h-3.5 shrink-0" />}
             <span>{isAdminView ? t.backToSite : t.adminButton}</span>
-          </button>
+          </Link>
 
           {!isAdminView && (
             <button
@@ -161,15 +151,35 @@ export function Header({ lang, onChangeLang, isAdminView, onToggleAdmin }: Heade
           className="lg:hidden border-t border-slate-200 bg-white px-4 py-3 space-y-1"
         >
           {navItems.map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-              onClick={() => handleNavClick(item.href)}
-              className="block px-3 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0F2544] hover:bg-slate-50 rounded-lg transition-colors"
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `block px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
+                  isActive
+                    ? 'bg-slate-100 text-[#0F2544] font-semibold'
+                    : 'text-slate-700 hover:text-[#0F2544] hover:bg-slate-50'
+                }`
+              }
             >
               {item.label}
-            </a>
+            </NavLink>
           ))}
+          <NavLink
+            to="/contacts"
+            onClick={() => setMobileMenuOpen(false)}
+            className={({ isActive }) =>
+              `block px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
+                isActive
+                  ? 'bg-slate-100 text-[#0F2544] font-semibold'
+                  : 'text-slate-700 hover:text-[#0F2544] hover:bg-slate-50'
+              }`
+            }
+          >
+            {t.nav.contacts}
+          </NavLink>
         </nav>
       )}
     </header>

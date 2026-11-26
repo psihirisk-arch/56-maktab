@@ -9,9 +9,17 @@ interface StaffSectionProps {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
+  isStandalonePage?: boolean;
 }
 
-export function StaffSection({ lang, staff, loading, error, onRetry }: StaffSectionProps) {
+export function StaffSection({
+  lang,
+  staff,
+  loading,
+  error,
+  onRetry,
+  isStandalonePage = false,
+}: StaffSectionProps) {
   const t = translations[lang];
 
   return (
@@ -21,9 +29,15 @@ export function StaffSection({ lang, staff, loading, error, onRetry }: StaffSect
           <p className="text-xs font-semibold tracking-wide text-[#047857] uppercase">
             {t.staff.kicker}
           </p>
-          <h2 className="mt-2 font-serif text-2xl sm:text-3xl font-semibold text-[#0F2544] tracking-tight text-balance">
-            {t.staff.title}
-          </h2>
+          {isStandalonePage ? (
+            <h1 className="mt-2 font-serif text-3xl sm:text-4xl font-semibold text-[#0F2544] tracking-tight text-balance">
+              {t.staff.title}
+            </h1>
+          ) : (
+            <h2 className="mt-2 font-serif text-2xl sm:text-3xl font-semibold text-[#0F2544] tracking-tight text-balance">
+              {t.staff.title}
+            </h2>
+          )}
           <p className="mt-3 text-base text-slate-600 leading-relaxed">{t.staff.subtitle}</p>
         </div>
 

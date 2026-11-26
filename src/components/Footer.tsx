@@ -1,4 +1,5 @@
 import { ArrowUpRight, Mail, MapPin, Phone } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { translations } from '../i18n';
 import type { Language, SiteSettings } from '../types';
 
@@ -19,7 +20,7 @@ export function Footer({ lang, settings }: FooterProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 lg:gap-8">
           {/* School Identity */}
           <div className="lg:col-span-4">
-            <div className="flex items-center gap-2.5 text-white">
+            <Link to="/" className="inline-flex items-center gap-2.5 text-white hover:opacity-90">
               <svg
                 width="28"
                 height="28"
@@ -44,7 +45,7 @@ export function Footer({ lang, settings }: FooterProps) {
               <span className="font-serif text-lg font-semibold text-white tracking-tight">
                 {schoolName}
               </span>
-            </div>
+            </Link>
             <p className="mt-4 text-sm text-slate-400 leading-relaxed max-w-sm">
               {t.footer.aboutText}
             </p>
@@ -53,7 +54,9 @@ export function Footer({ lang, settings }: FooterProps) {
           {/* Contact Details */}
           <div className="lg:col-span-3">
             <h3 className="text-sm font-semibold text-white tracking-wide">
-              {t.footer.contactTitle}
+              <Link to="/contacts" className="hover:text-emerald-400 transition-colors">
+                {t.footer.contactTitle}
+              </Link>
             </h3>
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex items-start gap-2.5">
@@ -105,29 +108,39 @@ export function Footer({ lang, settings }: FooterProps) {
             </h3>
             <ul className="mt-4 space-y-2.5 text-sm">
               <li>
-                <a href="#hero" className="text-slate-300 hover:text-white transition-colors">
+                <Link to="/" className="text-slate-300 hover:text-white transition-colors">
                   {t.nav.home}
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="#about" className="text-slate-300 hover:text-white transition-colors">
+                <Link to="/about" className="text-slate-300 hover:text-white transition-colors">
                   {t.nav.about}
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="#staff" className="text-slate-300 hover:text-white transition-colors">
+                <Link to="/staff" className="text-slate-300 hover:text-white transition-colors">
                   {t.nav.staff}
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="#news" className="text-slate-300 hover:text-white transition-colors">
+                <Link to="/teachers" className="text-slate-300 hover:text-white transition-colors">
+                  {t.nav.teachers}
+                </Link>
+              </li>
+              <li>
+                <Link to="/news" className="text-slate-300 hover:text-white transition-colors">
                   {t.nav.news}
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="#resources" className="text-slate-300 hover:text-white transition-colors">
+                <Link to="/resources" className="text-slate-300 hover:text-white transition-colors">
                   {t.nav.resources}
-                </a>
+                </Link>
+              </li>
+              <li>
+                <Link to="/contacts" className="text-slate-300 hover:text-white transition-colors">
+                  {t.nav.contacts}
+                </Link>
               </li>
             </ul>
           </div>

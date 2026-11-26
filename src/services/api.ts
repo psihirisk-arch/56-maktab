@@ -1,215 +1,209 @@
 import type {
+  AdminUser,
   BellScheduleData,
   LoginResponse,
   NewsItem,
   SiteSettings,
   StaffMember,
+  Teacher,
 } from '../types';
 
-export class ApiUnavailableError extends Error {
-  constructor(message = 'Backend API is not reachable') {
-    super(message);
-    this.name = 'ApiUnavailableError';
-  }
-}
-
 export class ApiAuthError extends Error {
-  constructor(message = 'Invalid credentials') {
+  constructor(message = 'Unauthorized') {
     super(message);
     this.name = 'ApiAuthError';
   }
 }
 
-function isJsonResponse(response: Response): boolean {
-  const contentType = response.headers.get('content-type') || '';
-  return contentType.toLowerCase().includes('application/json');
+export class ApiRequestError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.code = code;
+  }
 }
 
-async function handlePublicGet<T>(url: string): Promise<T> {
-  let response: Response;
+async function parseErrorBody(response: Response): Promise<{ message: string; error?: string }> {
   try {
-    response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+    const data = (await response.json()) as { message?: string; error?: string };
+    return {
+      message: data.message || `HTTP ${response.status}`,
+      error: data.error,
+    };
   } catch {
-    throw new ApiUnavailableError();
+    return { message: `HTTP ${response.status}` };
   }
-
-  if (
-    response.status === 404 ||
-    response.status === 502 ||
-    response.status === 503 ||
-    !isJsonResponse(response)
-  ) {
-    throw new ApiUnavailableError();
-  }
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as T;
 }
 
-async function handleAuthorizedMutation<T>(
+async function requestJson<T>(
   url: string,
-  method: 'POST' | 'PUT' | 'DELETE',
-  token: string,
-  body?: FormData | string,
-  isJsonBody = false
+  options: RequestInit = {},
+  token?: string
 ): Promise<T> {
-  let response: Response;
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+    ...((options.headers as Record<string, string>) || {}),
   };
-  if (isJsonBody) {
-    headers['Content-Type'] = 'application/json';
-    headers['Accept'] = 'application/json';
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
 
-  try {
-    response = await fetch(url, {
-      method,
-      headers,
-      body,
-    });
-  } catch {
-    throw new ApiUnavailableError();
-  }
+  const response = await fetch(url, { ...options, headers });
 
-  if (
-    response.status === 404 ||
-    response.status === 502 ||
-    response.status === 503 ||
-    (method !== 'DELETE' && !isJsonResponse(response))
-  ) {
-    throw new ApiUnavailableError();
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    throw new ApiAuthError();
+  if (response.status === 401) {
+    const err = await parseErrorBody(response);
+    throw new ApiAuthError(err.message);
   }
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    const err = await parseErrorBody(response);
+    throw new ApiRequestError(err.message, err.error);
   }
 
-  if (method === 'DELETE' || response.status === 204) {
+  if (response.status === 204) {
     return undefined as T;
   }
 
   return (await response.json()) as T;
 }
 
-export async function fetchNews(): Promise<NewsItem[]> {
-  return handlePublicGet<NewsItem[]>('/api/news');
+// --- Public APIs ---
+
+export function fetchNews(): Promise<NewsItem[]> {
+  return requestJson<NewsItem[]>('/api/news');
 }
 
-export async function fetchStaff(): Promise<StaffMember[]> {
-  return handlePublicGet<StaffMember[]>('/api/staff');
+export function fetchNewsById(id: string): Promise<NewsItem> {
+  return requestJson<NewsItem>(`/api/news/${id}`);
 }
 
-export async function fetchSchedule(): Promise<BellScheduleData> {
-  return handlePublicGet<BellScheduleData>('/api/schedule');
+export function fetchStaff(): Promise<StaffMember[]> {
+  return requestJson<StaffMember[]>('/api/staff');
 }
 
-export async function fetchSettings(): Promise<SiteSettings> {
-  return handlePublicGet<SiteSettings>('/api/settings');
+export function fetchTeachers(): Promise<Teacher[]> {
+  return requestJson<Teacher[]>('/api/teachers');
 }
 
-export async function loginAdmin(username: string, password: string): Promise<LoginResponse> {
-  let response: Response;
-  try {
-    response = await fetch('/api/login', {
+export function fetchSchedule(): Promise<BellScheduleData> {
+  return requestJson<BellScheduleData>('/api/schedule');
+}
+
+export function fetchSettings(): Promise<SiteSettings> {
+  return requestJson<SiteSettings>('/api/settings');
+}
+
+// --- Auth APIs ---
+
+export function loginAdmin(username: string, password: string): Promise<LoginResponse> {
+  return requestJson<LoginResponse>('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function fetchCurrentAdmin(token: string): Promise<{ admin: AdminUser }> {
+  return requestJson<{ admin: AdminUser }>('/api/me', {}, token);
+}
+
+// --- Admin Management APIs ---
+
+export function fetchAdmins(token: string): Promise<AdminUser[]> {
+  return requestJson<AdminUser[]>('/api/admins', {}, token);
+}
+
+export function createAdminAccount(
+  payload: { username: string; password: string; full_name: string },
+  token: string
+): Promise<AdminUser> {
+  return requestJson<AdminUser>(
+    '/api/admins',
+    {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({ username, password }),
-    });
-  } catch {
-    throw new ApiUnavailableError();
-  }
-
-  if (
-    response.status === 404 ||
-    response.status === 502 ||
-    response.status === 503 ||
-    !isJsonResponse(response)
-  ) {
-    throw new ApiUnavailableError();
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    const errBody = await response.json().catch(() => ({}));
-    throw new ApiAuthError(errBody?.message || 'Unauthorized');
-  }
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as LoginResponse;
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    token
+  );
 }
 
-export async function createNews(formData: FormData, token: string): Promise<NewsItem> {
-  return handleAuthorizedMutation<NewsItem>('/api/news', 'POST', token, formData);
+export function deleteAdminAccount(id: string, token: string): Promise<void> {
+  return requestJson<void>(`/api/admins/${id}`, { method: 'DELETE' }, token);
 }
 
-export async function updateNews(
+// --- Protected Content APIs ---
+
+export function createNews(formData: FormData, token: string): Promise<NewsItem> {
+  return requestJson<NewsItem>('/api/news', { method: 'POST', body: formData }, token);
+}
+
+export function updateNews(
   id: number | string,
   formData: FormData,
   token: string
 ): Promise<NewsItem> {
-  return handleAuthorizedMutation<NewsItem>(`/api/news/${id}`, 'PUT', token, formData);
+  return requestJson<NewsItem>(`/api/news/${id}`, { method: 'PUT', body: formData }, token);
 }
 
-export async function deleteNews(id: number | string, token: string): Promise<void> {
-  return handleAuthorizedMutation<void>(`/api/news/${id}`, 'DELETE', token);
+export function deleteNews(id: number | string, token: string): Promise<void> {
+  return requestJson<void>(`/api/news/${id}`, { method: 'DELETE' }, token);
 }
 
-export async function createStaff(formData: FormData, token: string): Promise<StaffMember> {
-  return handleAuthorizedMutation<StaffMember>('/api/staff', 'POST', token, formData);
+export function createStaff(formData: FormData, token: string): Promise<StaffMember> {
+  return requestJson<StaffMember>('/api/staff', { method: 'POST', body: formData }, token);
 }
 
-export async function updateStaff(
+export function updateStaff(
   id: number | string,
   formData: FormData,
   token: string
 ): Promise<StaffMember> {
-  return handleAuthorizedMutation<StaffMember>(`/api/staff/${id}`, 'PUT', token, formData);
+  return requestJson<StaffMember>(`/api/staff/${id}`, { method: 'PUT', body: formData }, token);
 }
 
-export async function deleteStaff(id: number | string, token: string): Promise<void> {
-  return handleAuthorizedMutation<void>(`/api/staff/${id}`, 'DELETE', token);
+export function deleteStaff(id: number | string, token: string): Promise<void> {
+  return requestJson<void>(`/api/staff/${id}`, { method: 'DELETE' }, token);
 }
 
-export async function saveSchedule(
-  schedule: BellScheduleData,
+export function createTeacher(formData: FormData, token: string): Promise<Teacher> {
+  return requestJson<Teacher>('/api/teachers', { method: 'POST', body: formData }, token);
+}
+
+export function updateTeacher(
+  id: number | string,
+  formData: FormData,
   token: string
-): Promise<BellScheduleData> {
-  return handleAuthorizedMutation<BellScheduleData>(
+): Promise<Teacher> {
+  return requestJson<Teacher>(`/api/teachers/${id}`, { method: 'PUT', body: formData }, token);
+}
+
+export function deleteTeacher(id: number | string, token: string): Promise<void> {
+  return requestJson<void>(`/api/teachers/${id}`, { method: 'DELETE' }, token);
+}
+
+export function saveSchedule(schedule: BellScheduleData, token: string): Promise<BellScheduleData> {
+  return requestJson<BellScheduleData>(
     '/api/schedule',
-    'PUT',
-    token,
-    JSON.stringify(schedule),
-    true
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(schedule),
+    },
+    token
   );
 }
 
-export async function saveSettings(
-  settings: SiteSettings,
-  token: string
-): Promise<SiteSettings> {
-  return handleAuthorizedMutation<SiteSettings>(
+export function saveSettings(settings: SiteSettings, token: string): Promise<SiteSettings> {
+  return requestJson<SiteSettings>(
     '/api/settings',
-    'PUT',
-    token,
-    JSON.stringify(settings),
-    true
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    },
+    token
   );
 }

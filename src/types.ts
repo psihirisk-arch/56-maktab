@@ -4,6 +4,8 @@ export interface NewsItem {
   id: number | string;
   title_uz: string;
   title_ru: string;
+  summary_uz?: string;
+  summary_ru?: string;
   content_uz: string;
   content_ru: string;
   image_url: string | null;
@@ -19,8 +21,30 @@ export interface StaffMember {
   photo_url: string | null;
 }
 
+export interface Teacher {
+  id: number | string;
+  full_name: string;
+  subject_uz: string;
+  subject_ru: string;
+  category_uz: string;
+  category_ru: string;
+  experience_years: string;
+  bio_uz: string;
+  bio_ru: string;
+  photo_url: string | null;
+}
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  full_name: string;
+  is_root: boolean;
+  created_at: string;
+}
+
 export interface LoginResponse {
   token: string;
+  admin: AdminUser;
 }
 
 export interface BellLesson {

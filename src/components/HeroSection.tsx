@@ -1,16 +1,16 @@
 import { ArrowRight } from 'lucide-react';
-import { HERO_CAMPUS_IMAGE } from '../data/fallbackData';
+import { Link } from 'react-router-dom';
+import { HERO_CAMPUS_IMAGE } from '../config/defaults';
 import { translations } from '../i18n';
 import type { Language, SiteSettings } from '../types';
 import { SafeImage } from './SafeImage';
 
 interface HeroSectionProps {
   lang: Language;
-  isDemoMode: boolean;
   settings: SiteSettings;
 }
 
-export function HeroSection({ lang, isDemoMode, settings }: HeroSectionProps) {
+export function HeroSection({ lang, settings }: HeroSectionProps) {
   const t = translations[lang];
 
   const regionText = lang === 'uz' ? settings.region_uz : settings.region_ru;
@@ -33,12 +33,6 @@ export function HeroSection({ lang, isDemoMode, settings }: HeroSectionProps) {
           <div className="lg:col-span-7 flex flex-col justify-center">
             <p className="text-xs font-medium tracking-wide text-slate-500 mb-4">
               {regionText}
-              {isDemoMode && (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  <span className="text-[#B45309]">{t.demoNotice}</span>
-                </>
-              )}
             </p>
 
             <h1 className="font-serif text-3xl sm:text-4xl lg:text-[46px] font-semibold leading-[1.15] tracking-tight text-[#0F2544] text-balance max-w-2xl">
@@ -50,20 +44,20 @@ export function HeroSection({ lang, isDemoMode, settings }: HeroSectionProps) {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3.5">
-              <a
-                href="#news"
+              <Link
+                to="/news"
                 className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold text-white bg-[#0F2544] hover:bg-[#173560] rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F2544]"
               >
                 <span>{t.hero.primaryCta}</span>
                 <ArrowRight className="w-4 h-4 shrink-0" />
-              </a>
+              </Link>
 
-              <a
-                href="#about"
+              <Link
+                to="/about"
                 className="inline-flex items-center px-5 py-3 text-sm font-semibold text-[#0F2544] bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F2544]"
               >
                 {t.hero.secondaryCta}
-              </a>
+              </Link>
             </div>
           </div>
 
