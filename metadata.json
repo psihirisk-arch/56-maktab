@@ -1,0 +1,6 @@
+{
+  "name": "56-sonli umumiy o'rta ta'lim maktabi",
+  "description": "Namangan viloyati Davlatobod tumanidagi 56-sonli umumiy o'rta ta'lim maktabining rasmiy veb-sayti — yangiliklar, rahbariyat, dars va qo'ng'iroqlar jadvali hamda boshqaruv paneli.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
